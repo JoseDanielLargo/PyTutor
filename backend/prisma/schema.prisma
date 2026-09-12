@@ -1,0 +1,238 @@
+// PyTutor database schema (Phase A).
+// This single file is the source of truth for the whole database structure.
+// When you change a model here and run `prisma migrate dev`, Prisma updates
+// the real PostgreSQL database to match.
+// Docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  // The app talks to the database through the pooler connection...
+  url       = env("DATABASE_URL")
+  // ...but migrations need the direct connection.
+  directUrl = env("DIRECT_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Enums (fixed sets of allowed values)
+// ---------------------------------------------------------------------------
+
+/// Who a user is and what they can see.
+/// TUTOR: sees only their own students/classes/materials.
+/// ADMIN: the platform creator, sees everything across all tutors.
+enum Role {
+  TUTOR
+  ADMIN
+}
+
+enum StudentLevel {
+  BASIC
+  INTERMEDIATE
+  ADVANCED
+  CUSTOM
+}
+
+enum StudentStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum ClassType {
+  INDIVIDUAL
+  GROUP
+  SPECIAL
+}
+
+enum ClassStatus {
+  SCHEDULED
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+}
+
+enum PaymentMethod {
+  NEQUI
+  CASH
+  BANCOLOMBIA
+  LLAVE
+}
+
+enum PaymentStatus {
+  PENDING
+  PARTIAL
+  PAID
+}
+
+enum MaterialType {
+  PDF
+  LINK
+  VIDEO
+  EXERCISE
+  WORKSHOP
+  OTHER
+}
+
+// ---------------------------------------------------------------------------
+// Models (each becomes a table in PostgreSQL)
+// ---------------------------------------------------------------------------
+
+/// A login account. Right now this is just you (an ADMIN who is also a TUTOR),
+/// but the `role` + relations below are what make multi-tutor possible later.
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  role         Role     @default(TUTOR)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Everything a tutor owns points back here. In Phase A this is always you;
+  // in Phase B a query simply filters by the logged-in tutor's id.
+  students  Student[]
+  subjects  Subject[]
+  classes   Class[]
+  materials Material[]
+}
+
+/// A person receiving tutoring.
+model Student {
+  id            String        @id @default(uuid())
+  name          String
+  phone         String?
+  email         String?
+  level         StudentLevel  @default(BASIC)
+  status        StudentStatus @default(ACTIVE)
+  classesTaken  Int           @default(0)
+  hoursTaken    Float         @default(0)
+  hadFirstClass Boolean       @default(false)
+  notes         String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  // The tutor who owns this student record.
+  tutor   User   @relation(fields: [tutorId], references: [id])
+  tutorId String
+
+  classLinks ClassStudent[]
+  payments   Payment[]
+
+  @@index([tutorId])
+}
+
+/// The area/topic of tutoring (Math, Python, Calculus, ...).
+model Subject {
+  id          String  @id @default(uuid())
+  name        String
+  description String?
+
+  tutor   User   @relation(fields: [tutorId], references: [id])
+  tutorId String
+
+  classes   Class[]
+  materials Material[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tutorId])
+}
+
+/// A single tutoring session (scheduled or completed).
+model Class {
+  id                String      @id @default(uuid())
+  date              DateTime
+  startTime         String? // e.g. "16:00"
+  endTime           String? // e.g. "18:00"
+  durationHours     Float
+  type              ClassType   @default(INDIVIDUAL)
+  status            ClassStatus @default(SCHEDULED)
+  // Pricing breakdown (kept in Colombian pesos, no decimals needed).
+  baseValue         Int         @default(0)
+  groupDiscount     Int         @default(0)
+  firstTimeDiscount Int         @default(0)
+  manualDiscount    Int         @default(0)
+  totalValue        Int         @default(0)
+  // Academic log for the session.
+  topicWorked       String?
+  classLog          String?
+  difficulties      String?
+  nextTopics        String?
+  notes             String?
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+
+  tutor   User   @relation(fields: [tutorId], references: [id])
+  tutorId String
+
+  subject   Subject? @relation(fields: [subjectId], references: [id])
+  subjectId String?
+
+  studentLinks ClassStudent[]
+  payments     Payment[]
+
+  @@index([tutorId])
+  @@index([subjectId])
+}
+
+/// Join table: which students attended which class (many-to-many).
+/// A class can have several students; a student can be in many classes.
+model ClassStudent {
+  id                     String  @id @default(uuid())
+  individualValue        Int     @default(0)
+  firstTimeDiscountApplied Boolean @default(false)
+  attended               Boolean @default(false)
+
+  class     Class   @relation(fields: [classId], references: [id], onDelete: Cascade)
+  classId   String
+  student   Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  studentId String
+
+  // A given student can only be linked to a given class once.
+  @@unique([classId, studentId])
+  @@index([studentId])
+}
+
+/// A payment made by a student, optionally tied to a specific class.
+model Payment {
+  id       String        @id @default(uuid())
+  paidAt   DateTime      @default(now())
+  amount   Int
+  method   PaymentMethod
+  status   PaymentStatus @default(PENDING)
+  notes    String?
+
+  student   Student @relation(fields: [studentId], references: [id])
+  studentId String
+
+  class   Class?  @relation(fields: [classId], references: [id])
+  classId String?
+
+  @@index([studentId])
+  @@index([classId])
+}
+
+/// A teaching resource (PDF, link, video, exercise, ...) tied to a subject.
+model Material {
+  id                String       @id @default(uuid())
+  title             String
+  type              MaterialType @default(OTHER)
+  topic             String?
+  recommendedLevel  StudentLevel?
+  description       String?
+  url               String?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  tutor   User   @relation(fields: [tutorId], references: [id])
+  tutorId String
+
+  subject   Subject? @relation(fields: [subjectId], references: [id])
+  subjectId String?
+
+  @@index([tutorId])
+  @@index([subjectId])
+}
