@@ -1,0 +1,46 @@
+<header class="topbar">
+  <h1>PyTutor</h1>
+  <div class="user-box">
+    @if (auth.user(); as user) {
+      <span class="user-name">{{ user.name }}</span>
+      <span class="badge">{{ user.role }}</span>
+    }
+    <button class="logout" (click)="logout()">Log out</button>
+  </div>
+</header>
+
+<main class="content">
+  <section class="card">
+    <h2>My subjects</h2>
+
+    <form class="add-row" (ngSubmit)="addSubject()">
+      <input
+        name="newSubject"
+        [(ngModel)]="newSubjectName"
+        placeholder="e.g. Python, Calculus..."
+      />
+      <button type="submit">Add subject</button>
+    </form>
+
+    @if (error()) {
+      <p class="error">{{ error() }}</p>
+    }
+
+    @if (loading()) {
+      <p class="muted">Loading...</p>
+    } @else if (subjects().length === 0) {
+      <p class="muted">No subjects yet. Add your first one above!</p>
+    } @else {
+      <ul class="subject-list">
+        @for (subject of subjects(); track subject.id) {
+          <li>
+            <strong>{{ subject.name }}</strong>
+            @if (subject.description) {
+              <span class="desc"> — {{ subject.description }}</span>
+            }
+          </li>
+        }
+      </ul>
+    }
+  </section>
+</main>
